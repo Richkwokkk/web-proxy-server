@@ -1,0 +1,53 @@
+commit 023d0642a81372d3c616fa9d70da7513eba4df4a
+Author: Richkwokkk <guofeinan@gmail.com>
+Date:   Tue Mar 25 17:44:33 2025 +1030
+
+    Handled origin server ports specified in the URL
+
+commit 0271b286a459a020c15d4f399c0292bd3cfc0799
+Author: Richkwokkk <guofeinan@gmail.com>
+Date:   Tue Mar 25 17:27:10 2025 +1030
+
+    Updated location of check for Expires header
+
+commit d9b550eaf4d01a3402ca8d126c0dde200167231d
+Author: Richkwokkk <guofeinan@gmail.com>
+Date:   Tue Mar 25 17:24:13 2025 +1030
+
+    Scanned HTML for href and src attributes and pre-fetched resources
+
+commit 32e6c8abb27fabfbcbc92e564db81d165c55b98b
+Author: Richkwokkk <guofeinan@gmail.com>
+Date:   Tue Mar 25 16:55:06 2025 +1030
+
+    Handled Expires header, cache metadata, and origin server ports
+
+commit 843866096c5e11e8add05cb159887ece000dbcc8
+Author: Richkwokkk <guofeinan@gmail.com>
+Date:   Tue Mar 25 15:42:56 2025 +1030
+
+    Cleaned up Proxy-bonus.py for bonus
+
+commit 187947d29bd9751d8432214654afbb9443f97c0a
+Author: Richkwokkk <guofeinan@gmail.com>
+Date:   Tue Mar 25 15:00:17 2025 +1030
+
+    created cache file, wrote response to cache file, and closed cache file
+
+commit 8edeba799c864a863d4a0238cfc07d2ae86c5763
+Author: Richkwokkk <guofeinan@gmail.com>
+Date:   Tue Mar 25 14:57:16 2025 +1030
+
+    created socket to connect to origin server, constructed request, sent request to origin server, received response, and sent response to client
+
+commit c775003a3424651c8abbc9c22f692656c5ece800
+Author: Richkwokkk <guofeinan@gmail.com>
+Date:   Tue Mar 25 14:49:28 2025 +1030
+
+    created proxy socket, bound to port, listened for connection, received request, extracted method, URI, and version
+
+commit c944920f7ca875ed8efa6b79f9bb08f6781900fa
+Author: Richkwokkk <guofeinan@gmail.com>
+Date:   Tue Mar 25 14:37:58 2025 +1030
+
+    added a template
