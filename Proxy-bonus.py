@@ -1,9 +1,26 @@
+# Bonus mark solutions:
+
+# 1. Check the Expires header of cached objects to determine if a new copy is needed from the origin server instead of just sending back the cached copy.
+# Lines 120-167, 218-232
+# Added code to check if a cached resource is still valid based on its Expires header
+# Created a separate metadata file (.metadata) to store HTTP headers from the response
+# When a response is cached, the headers are now saved to this metadata file
+# Before serving from cache, the proxy checks if the Expires date is in the future
+# If the cache is valid (not expired), serve from cache
+# If the cache is expired or validation is needed, fetch from the origin server
+
+# 2. Pre-fetch the associated files of the main webpage and cache them in the proxy server (DO NOT send them back to the client if the client does not request them). Look for "href=" and "src=" in the HTML.
+
+# 3. The current proxy only handles URLs of the form hostname/file. Add the ability to handle origin server ports that are specified in the URL, i.e. hostname:portnumber/file.
+
 # Include the libraries for socket and system calls
 import socket
 import sys
 import os
 import argparse
 import re
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 
 # 1MB buffer size
 BUFFER_SIZE = 1000000
@@ -100,19 +117,54 @@ while True:
 
     fileExists = os.path.isfile(cacheLocation)
     
-    # Check wether the file is currently in the cache
-    cacheFile = open(cacheLocation, "r")
-    cacheData = cacheFile.readlines()
-
-    print ('Cache hit! Loading from cache file: ' + cacheLocation)
-    # ProxyServer finds a cache hit
-    # Send back response to client 
-    clientSocket.sendall(cacheData)
-    cacheFile.close()
-    print ('Sent to the client:')
-    print ('> ' + cacheData)
-  except:
-    # cache miss.  Get resource from origin server
+    # Check if the file is currently in the cache
+    if fileExists:
+        # Check if we need to validate the cache based on Expires header
+        cacheMetadataLocation = cacheLocation + ".metadata"
+        cache_valid = False
+        
+        if os.path.isfile(cacheMetadataLocation):
+            with open(cacheMetadataLocation, "r") as metadataFile:
+                metadata = metadataFile.read()
+                # Look for Expires header
+                expires_match = re.search(r'Expires: (.*?)(?:\r\n|\n|$)', metadata)
+                if expires_match:
+                    expires_str = expires_match.group(1)
+                    try:
+                        # Parse the expiration date
+                        expires_date = parsedate_to_datetime(expires_str)
+                        current_time = datetime.now(expires_date.tzinfo)
+                        
+                        # Check if the cache is still valid
+                        if current_time < expires_date:
+                            cache_valid = True
+                            print(f"Cache is valid until {expires_date}")
+                        else:
+                            print(f"Cache expired at {expires_date}")
+                    except Exception as e:
+                        print(f"Error parsing expiration date: {e}")
+                else:
+                    print("No Expires header found in metadata")
+        
+        if cache_valid:
+            # Cache is valid, serve from cache
+            with open(cacheLocation, "rb") as cacheFile:
+                cacheData = cacheFile.read()
+            
+            print('Cache hit! Loading from valid cache file: ' + cacheLocation)
+            # Send back response to client 
+            clientSocket.sendall(cacheData)
+            print('Sent cached content to the client')
+        else:
+            # Cache exists but is expired or no metadata, need to revalidate
+            print('Cache exists but may be expired. Fetching from origin server')
+            raise Exception("Cache validation needed")
+    else:
+        # No cache exists
+        print('Cache miss. Fetching from origin server')
+        raise Exception("Cache miss")
+  except Exception as e:
+    # cache miss or validation needed. Get resource from origin server
     originServerSocket = None
     # Create a socket to connect to origin server
     # and store in originServerSocket
@@ -163,12 +215,21 @@ while True:
       print ('cached directory ' + cacheDir)
       if not os.path.exists(cacheDir):
         os.makedirs(cacheDir)
-      cacheFile = open(cacheLocation, 'wb')
-
+      
       # Save origin server response in the cache file
-      cacheFile.write(response)
-      cacheFile.close()
-      print ('cache file closed')
+      with open(cacheLocation, 'wb') as cacheFile:
+          cacheFile.write(response)
+      
+      # Extract and save headers to metadata file for future cache validation
+      response_str = response.decode('utf-8', errors='ignore')
+      headers_end = response_str.find('\r\n\r\n')
+      if headers_end != -1:
+          headers = response_str[:headers_end]
+          with open(cacheLocation + ".metadata", 'w') as metadataFile:
+              metadataFile.write(headers)
+          print('Saved response headers to metadata file')
+      
+      print ('cache file saved')
 
       # finished communicating with origin server - shutdown socket writes
       print ('origin response received. Closing sockets')
