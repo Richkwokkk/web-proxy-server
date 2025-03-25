@@ -1,7 +1,7 @@
 # Bonus mark solutions:
 
 # 1. Check the Expires header of cached objects to determine if a new copy is needed from the origin server instead of just sending back the cached copy.
-# Lines 120-167, 218-232
+# Lines 237-284, 336-349
 # Added code to check if a cached resource is still valid based on its Expires header
 # Created a separate metadata file (.metadata) to store HTTP headers from the response
 # When a response is cached, the headers are now saved to this metadata file
