@@ -10,6 +10,10 @@
 # If the cache is expired or validation is needed, fetch from the origin server
 
 # 2. Pre-fetch the associated files of the main webpage and cache them in the proxy server (DO NOT send them back to the client if the client does not request them). Look for "href=" and "src=" in the HTML.
+# Lines 66-176, 351-359
+# Added code to scan HTML responses for href and src attributes
+# Extracts URLs from these attributes and pre-fetches them
+# Creates a separate thread for each pre-fetch to avoid blocking the main request
 
 # 3. The current proxy only handles URLs of the form hostname/file. Add the ability to handle origin server ports that are specified in the URL, i.e. hostname:portnumber/file.
 
@@ -21,6 +25,7 @@ import argparse
 import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+import threading
 
 # 1MB buffer size
 BUFFER_SIZE = 1000000
@@ -57,6 +62,118 @@ try:
 except:
   print ('Failed to listen')
   sys.exit()
+
+# Function to pre-fetch resources found in HTML
+def pre_fetch_resources(html_content, base_hostname, base_resource):
+    # Extract all href and src attributes from the HTML
+    href_pattern = re.compile(r'href=["\'](.*?)["\']', re.IGNORECASE)
+    src_pattern = re.compile(r'src=["\'](.*?)["\']', re.IGNORECASE)
+    
+    href_urls = href_pattern.findall(html_content)
+    src_urls = src_pattern.findall(html_content)
+    
+    # Combine all URLs found
+    all_urls = href_urls + src_urls
+    
+    print(f"Found {len(all_urls)} URLs to pre-fetch")
+    
+    # Process each URL
+    for url in all_urls:
+        # Skip empty URLs, javascript, and anchors
+        if not url or url.startswith('javascript:') or url.startswith('#'):
+            continue
+            
+        # Handle absolute and relative URLs
+        if url.startswith('http://') or url.startswith('https://'):
+            # Absolute URL
+            url = url.replace('http://', '').replace('https://', '')
+            parts = url.split('/', 1)
+            fetch_hostname = parts[0]
+            fetch_resource = '/' + (parts[1] if len(parts) > 1 else '')
+        elif url.startswith('//'):
+            # Protocol-relative URL
+            url = url[2:]  # Remove the leading //
+            parts = url.split('/', 1)
+            fetch_hostname = parts[0]
+            fetch_resource = '/' + (parts[1] if len(parts) > 1 else '')
+        elif url.startswith('/'):
+            # Root-relative URL
+            fetch_hostname = base_hostname
+            fetch_resource = url
+        else:
+            # Relative URL
+            fetch_hostname = base_hostname
+            # Combine with base resource path
+            base_dir = os.path.dirname(base_resource)
+            if not base_dir.endswith('/'):
+                base_dir += '/'
+            fetch_resource = os.path.normpath(base_dir + url)
+            if not fetch_resource.startswith('/'):
+                fetch_resource = '/' + fetch_resource
+        
+        # Start a new thread to fetch the resource
+        threading.Thread(target=fetch_and_cache_resource, 
+                         args=(fetch_hostname, fetch_resource)).start()
+
+def fetch_and_cache_resource(hostname, resource):
+    try:
+        print(f"Pre-fetching: {hostname}{resource}")
+        
+        # Check if resource is already in cache
+        cacheLocation = './' + hostname + resource
+        if cacheLocation.endswith('/'):
+            cacheLocation = cacheLocation + 'default'
+            
+        if os.path.isfile(cacheLocation):
+            print(f"Resource already in cache: {cacheLocation}")
+            return
+            
+        # Create a socket to connect to origin server
+        originServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        
+        try:
+            # Get the IP address for a hostname
+            address = socket.gethostbyname(hostname)
+            # Connect to the origin server
+            originServerSocket.connect((address, 80))
+            
+            # Create request
+            request = f"GET {resource} HTTP/1.1\r\nHost: {hostname}\r\n\r\n"
+            
+            # Send request
+            originServerSocket.sendall(request.encode())
+            
+            # Get response
+            response = originServerSocket.recv(BUFFER_SIZE)
+            
+            # Create cache directory if it doesn't exist
+            cacheDir, file = os.path.split(cacheLocation)
+            if not os.path.exists(cacheDir):
+                os.makedirs(cacheDir)
+            
+            # Save response to cache
+            with open(cacheLocation, 'wb') as cacheFile:
+                cacheFile.write(response)
+            
+            # Extract and save headers to metadata file
+            response_str = response.decode('utf-8', errors='ignore')
+            headers_end = response_str.find('\r\n\r\n')
+            if headers_end != -1:
+                headers = response_str[:headers_end]
+                with open(cacheLocation + ".metadata", 'w') as metadataFile:
+                    metadataFile.write(headers)
+            
+            print(f"Pre-fetched and cached: {hostname}{resource}")
+            
+            # Close socket
+            originServerSocket.close()
+            
+        except Exception as e:
+            print(f"Error pre-fetching {hostname}{resource}: {str(e)}")
+            if originServerSocket:
+                originServerSocket.close()
+    except Exception as e:
+        print(f"Pre-fetch thread error: {str(e)}")
 
 # continuously accept connections
 while True:
@@ -230,6 +347,16 @@ while True:
           print('Saved response headers to metadata file')
       
       print ('cache file saved')
+      
+      # Check if the response is HTML and pre-fetch resources if it is
+      content_type_match = re.search(r'Content-Type:\s*text/html', response_str, re.IGNORECASE)
+      if content_type_match and headers_end != -1:
+          # Extract the HTML content
+          html_content = response_str[headers_end + 4:]
+          # Start pre-fetching in a separate thread to avoid blocking
+          threading.Thread(target=pre_fetch_resources, 
+                          args=(html_content, hostname, resource)).start()
+          print("Started pre-fetching resources")
 
       # finished communicating with origin server - shutdown socket writes
       print ('origin response received. Closing sockets')
