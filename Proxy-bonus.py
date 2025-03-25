@@ -1,7 +1,7 @@
 # Bonus mark solutions:
 
 # 1. Check the Expires header of cached objects to determine if a new copy is needed from the origin server instead of just sending back the cached copy.
-# Lines 237-284, 336-349
+# Lines 265-326, 375-387
 # Added code to check if a cached resource is still valid based on its Expires header
 # Created a separate metadata file (.metadata) to store HTTP headers from the response
 # When a response is cached, the headers are now saved to this metadata file
@@ -10,12 +10,15 @@
 # If the cache is expired or validation is needed, fetch from the origin server
 
 # 2. Pre-fetch the associated files of the main webpage and cache them in the proxy server (DO NOT send them back to the client if the client does not request them). Look for "href=" and "src=" in the HTML.
-# Lines 66-176, 351-359
+# Lines 70-202, 389-397
 # Added code to scan HTML responses for href and src attributes
 # Extracts URLs from these attributes and pre-fetches them
 # Creates a separate thread for each pre-fetch to avoid blocking the main request
 
 # 3. The current proxy only handles URLs of the form hostname/file. Add the ability to handle origin server ports that are specified in the URL, i.e. hostname:portnumber/file.
+# Lines 70, 99-105, 114-120, 144, 251-263
+# Added code to extract port numbers from URLs in the format hostname:port/resource
+# Modified the connection to origin servers to use the specified port instead of always using port 80
 
 # Include the libraries for socket and system calls
 import socket
@@ -64,7 +67,7 @@ except:
   sys.exit()
 
 # Function to pre-fetch resources found in HTML
-def pre_fetch_resources(html_content, base_hostname, base_resource):
+def pre_fetch_resources(html_content, base_hostname, base_resource, base_port=80):
     # Extract all href and src attributes from the HTML
     href_pattern = re.compile(r'href=["\'](.*?)["\']', re.IGNORECASE)
     src_pattern = re.compile(r'src=["\'](.*?)["\']', re.IGNORECASE)
@@ -84,22 +87,44 @@ def pre_fetch_resources(html_content, base_hostname, base_resource):
             continue
             
         # Handle absolute and relative URLs
+        fetch_port = 80
+        
         if url.startswith('http://') or url.startswith('https://'):
             # Absolute URL
             url = url.replace('http://', '').replace('https://', '')
             parts = url.split('/', 1)
             fetch_hostname = parts[0]
             fetch_resource = '/' + (parts[1] if len(parts) > 1 else '')
+            
+            # Check for port in hostname
+            if ':' in fetch_hostname:
+                fetch_hostname, port_str = fetch_hostname.split(':', 1)
+                try:
+                    fetch_port = int(port_str)
+                except ValueError:
+                    fetch_port = 80
+
         elif url.startswith('//'):
             # Protocol-relative URL
             url = url[2:]  # Remove the leading //
             parts = url.split('/', 1)
             fetch_hostname = parts[0]
             fetch_resource = '/' + (parts[1] if len(parts) > 1 else '')
+            
+            # Check for port in hostname
+            if ':' in fetch_hostname:
+                fetch_hostname, port_str = fetch_hostname.split(':', 1)
+                try:
+                    fetch_port = int(port_str)
+                except ValueError:
+                    fetch_port = 80
+
         elif url.startswith('/'):
             # Root-relative URL
             fetch_hostname = base_hostname
             fetch_resource = url
+            fetch_port = base_port
+
         else:
             # Relative URL
             fetch_hostname = base_hostname
@@ -110,14 +135,15 @@ def pre_fetch_resources(html_content, base_hostname, base_resource):
             fetch_resource = os.path.normpath(base_dir + url)
             if not fetch_resource.startswith('/'):
                 fetch_resource = '/' + fetch_resource
+            fetch_port = base_port
         
         # Start a new thread to fetch the resource
         threading.Thread(target=fetch_and_cache_resource, 
-                         args=(fetch_hostname, fetch_resource)).start()
+                         args=(fetch_hostname, fetch_resource, fetch_port)).start()
 
-def fetch_and_cache_resource(hostname, resource):
+def fetch_and_cache_resource(hostname, resource, port=80):
     try:
-        print(f"Pre-fetching: {hostname}{resource}")
+        print(f"Pre-fetching: {hostname}:{port}{resource}")
         
         # Check if resource is already in cache
         cacheLocation = './' + hostname + resource
@@ -135,7 +161,7 @@ def fetch_and_cache_resource(hostname, resource):
             # Get the IP address for a hostname
             address = socket.gethostbyname(hostname)
             # Connect to the origin server
-            originServerSocket.connect((address, 80))
+            originServerSocket.connect((address, port))
             
             # Create request
             request = f"GET {resource} HTTP/1.1\r\nHost: {hostname}\r\n\r\n"
@@ -163,13 +189,13 @@ def fetch_and_cache_resource(hostname, resource):
                 with open(cacheLocation + ".metadata", 'w') as metadataFile:
                     metadataFile.write(headers)
             
-            print(f"Pre-fetched and cached: {hostname}{resource}")
+            print(f"Pre-fetched and cached: {hostname}:{port}{resource}")
             
             # Close socket
             originServerSocket.close()
             
         except Exception as e:
-            print(f"Error pre-fetching {hostname}{resource}: {str(e)}")
+            print(f"Error pre-fetching {hostname}:{port}{resource}: {str(e)}")
             if originServerSocket:
                 originServerSocket.close()
     except Exception as e:
@@ -222,7 +248,19 @@ while True:
     # Resource is absolute URI with hostname and resource
     resource = resource + resourceParts[1]
 
+  # Extract port number if specified in the hostname
+  port = 80
+  if ':' in hostname:
+    hostname, port_str = hostname.split(':', 1)
+    try:
+      port = int(port_str)
+    except ValueError:
+      print(f"Invalid port number: {port_str}, using default port 80")
+      port = 80
+
   print ('Requested Resource:\t' + resource)
+  print (f'Hostname:\t{hostname}')
+  print (f'Port:\t\t{port}')
 
   # Check if resource is in cache
   try:
@@ -291,9 +329,9 @@ while True:
     try:
       # Get the IP address for a hostname
       address = socket.gethostbyname(hostname)
-      # Connect to the origin server
-      originServerSocket.connect((address, 80))
-      print ('Connected to origin Server')
+      # Connect to the origin server using the specified port
+      originServerSocket.connect((address, port))
+      print (f'Connected to origin Server at {address}:{port}')
 
       originServerRequest = ''
       originServerRequestHeader = ''
@@ -355,7 +393,7 @@ while True:
           html_content = response_str[headers_end + 4:]
           # Start pre-fetching in a separate thread to avoid blocking
           threading.Thread(target=pre_fetch_resources, 
-                          args=(html_content, hostname, resource)).start()
+                          args=(html_content, hostname, resource, port)).start()
           print("Started pre-fetching resources")
 
       # finished communicating with origin server - shutdown socket writes
