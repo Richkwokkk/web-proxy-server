@@ -172,6 +172,37 @@ while True:
       # Get the response from the origin server
       # ~~~~ INSERT CODE ~~~~
       response = originServerSocket.recv(BUFFER_SIZE)
+      
+      # Check if the response is a redirect (301 or 302)
+      response_str = response.decode('utf-8', errors='ignore')
+      status_line = response_str.split('\r\n')[0]
+      
+      if ' 301 ' in status_line or ' 302 ' in status_line:
+          print('Detected redirect response:', status_line)
+          # Extract the Location header
+          location_match = re.search(r'Location: (.*?)\r\n', response_str)
+          if location_match:
+              redirect_url = location_match.group(1)
+              print('Redirect URL:', redirect_url)
+              # We'll still cache and forward the redirect response
+      
+      # Check for cache-control header
+      cache_control_match = re.search(r'Cache-Control: (.*?)\r\n', response_str, re.IGNORECASE)
+      should_cache = True
+      if cache_control_match:
+          cache_control = cache_control_match.group(1)
+          print('Cache-Control:', cache_control)
+          
+          # Check for no-store directive
+          if 'no-store' in cache_control.lower():
+              should_cache = False
+              print('Cache-Control directive no-store found, not caching response')
+          
+          # Check for max-age=0
+          max_age_match = re.search(r'max-age=(\d+)', cache_control.lower())
+          if max_age_match and int(max_age_match.group(1)) == 0:
+              should_cache = False
+              print('Cache-Control max-age=0 found, not caching response')
       # ~~~~ END CODE INSERT ~~~~
 
       # Send the response to the client
@@ -184,13 +215,17 @@ while True:
       print ('cached directory ' + cacheDir)
       if not os.path.exists(cacheDir):
         os.makedirs(cacheDir)
-      cacheFile = open(cacheLocation, 'wb')
-
+      
       # Save origin server response in the cache file
       # ~~~~ INSERT CODE ~~~~
-      cacheFile.write(response)
+      if should_cache:
+          cacheFile = open(cacheLocation, 'wb')
+          cacheFile.write(response)
+          cacheFile.close()
+          print('Response cached at:', cacheLocation)
+      else:
+          print('Response not cached due to cache control directives')
       # ~~~~ END CODE INSERT ~~~~
-      cacheFile.close()
       print ('cache file closed')
 
       # finished communicating with origin server - shutdown socket writes
